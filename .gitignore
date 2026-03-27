@@ -1,0 +1,29 @@
+# Build
+bin/
+obj/
+
+# Publish
+publish/
+publish_single/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Rider / JetBrains
+.idea/
+
+# Arquivos temporários
+*.tmp
+*.temp
