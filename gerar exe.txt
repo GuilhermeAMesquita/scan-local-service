@@ -1,5 +1,5 @@
 abrir o terminal e rodar
-dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o .\publish_single
 
 o arquivo exe cria na pasta
-C:\scan_local_service\ScanLocalService\bin\Release\net8.0-windows\win-x64\publish\
+C:\scan_local_service\ScanLocalService\publish_single

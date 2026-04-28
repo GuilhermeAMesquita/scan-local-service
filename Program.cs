@@ -105,7 +105,9 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
             ctx.Request.Query.TryGetValue("ui", out var v) &&
             (v.ToString() == "1" || v.ToString().Equals("true", StringComparison.OrdinalIgnoreCase));
 
-        byte[] imageBytes = await RunStaAsync(() => AcquireImagePngBytes(forceUi));
+        string? deviceId = ctx.Request.Query["deviceId"].ToString();
+
+        byte[] imageBytes = await RunStaAsync(() => AcquireImagePngBytes(forceUi, deviceId));
 
         if (imageBytes.Length == 0)
             return Results.BadRequest("Scan cancelado.");
@@ -142,7 +144,9 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
             ctx.Request.Query.TryGetValue("ui", out var v) &&
             (v.ToString() == "1" || v.ToString().Equals("true", StringComparison.OrdinalIgnoreCase));
 
-        byte[] imageBytes = await RunStaAsync(() => AcquireImagePngBytes(forceUi));
+        string? deviceId = ctx.Request.Query["deviceId"].ToString();
+
+        byte[] imageBytes = await RunStaAsync(() => AcquireImagePngBytes(forceUi, deviceId));
 
         if (imageBytes.Length == 0)
             return Results.BadRequest("Scan cancelado.");
@@ -259,14 +263,20 @@ notify.Visible = false;
 // MÉTODOS AUXILIARES
 // =======================
 
-static byte[] AcquireImagePngBytes(bool forceUi)
+static byte[] AcquireImagePngBytes(bool forceUi, string? deviceId = null)
 {
     const int ScannerDeviceType = 1; // WiaDeviceType.ScannerDeviceType
     const string WiaFormatPng = "{B96B3CAF-0728-11D3-9D7B-0000F81EF32E}"; // wiaFormatPNG
 
-    // Se pediu UI, vai direto no modo mais compatível
+    // Se pediu UI, só abre a janela do WIA quando NÃO veio scanner específico.
+    // Com deviceId, o ShowAcquireImage pode ignorar a escolha e acionar outro scanner.
     if (forceUi)
+    {
+        if (!string.IsNullOrWhiteSpace(deviceId))
+            throw new Exception("Modo com janela do scanner não suporta seleção direta por deviceId.");
+
         return AcquireWithUiDialog(WiaFormatPng);
+    }
 
     dynamic deviceManager = Activator.CreateInstance(
         Type.GetTypeFromProgID("WIA.DeviceManager")!
@@ -294,12 +304,36 @@ static byte[] AcquireImagePngBytes(bool forceUi)
     if (candidates.Count == 0)
         throw new Exception("Nenhum scanner encontrado.");
 
-    // Prioridade: USB (se existir), senão primeiro
-    var selected = candidates.FirstOrDefault(c =>
-        (c.name ?? "").Contains("USB", StringComparison.OrdinalIgnoreCase)
-    );
+    dynamic selectedInfo = null!;
 
-    dynamic selectedInfo = selected.info ?? candidates[0].info;
+    // Se veio um deviceId do Flutter, usa ele
+    if (!string.IsNullOrWhiteSpace(deviceId))
+    {
+        foreach (var c in candidates)
+        {
+            string id = "";
+            try { id = c.info.DeviceID?.ToString() ?? ""; } catch { }
+
+            if (string.Equals(id, deviceId, StringComparison.OrdinalIgnoreCase))
+            {
+                selectedInfo = c.info;
+                break;
+            }
+        }
+
+        if (selectedInfo == null)
+            throw new Exception("Scanner selecionado não encontrado.");
+    }
+    else
+    {
+        // Se não veio deviceId, mantém comportamento antigo
+        var selected = candidates.FirstOrDefault(c =>
+            (c.name ?? "").Contains("USB", StringComparison.OrdinalIgnoreCase)
+        );
+
+        selectedInfo = selected.info ?? candidates[0].info;
+    }
+
     dynamic selectedDevice = selectedInfo.Connect();
 
     // 1) tenta SILENT (sem UI)
@@ -313,8 +347,14 @@ static byte[] AcquireImagePngBytes(bool forceUi)
         // cai pro fallback
     }
 
-    // 2) fallback COM UI (mais compatível com drivers variados)
-    return AcquireWithUiDialog(WiaFormatPng);
+    // 2) fallback COM UI somente quando NÃO foi escolhido scanner específico.
+    // Se veio deviceId, não abre a janela do WIA para evitar acionar outro scanner.
+    if (string.IsNullOrWhiteSpace(deviceId))
+    {
+        return AcquireWithUiDialog(WiaFormatPng);
+    }
+
+    throw new Exception("Não foi possível escanear com o scanner selecionado. Tente selecionar outro scanner.");
 }
 
 static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
@@ -332,7 +372,7 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     return (byte[])image.FileData.BinaryData;
 }
 
-static byte[] AcquireWithUiDialog(string wiaFormatPng)
+static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
 {
     dynamic dialog = Activator.CreateInstance(
         Type.GetTypeFromProgID("WIA.CommonDialog")!
@@ -342,14 +382,16 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng)
     const int ColorIntent = 1;
     const int MaxQuality = 2;
 
+    bool alwaysSelectDevice = string.IsNullOrWhiteSpace(deviceId);
+
     dynamic image = dialog.ShowAcquireImage(
         ScannerDeviceType,
         ColorIntent,
         MaxQuality,
         wiaFormatPng,
-        false, // AlwaysSelectDevice (driver pode mostrar mesmo assim)
-        true,  // UseCommonUI
-        false  // CancelError
+        alwaysSelectDevice,
+        true,
+        false
     );
 
     if (image == null) return Array.Empty<byte>();
