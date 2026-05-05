@@ -4,6 +4,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using System.IO;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,6 +40,8 @@ builder.Services.AddCors(options =>
                 if (origin.StartsWith("https://regulariza-farma-8fk4wt.firebaseapp.com", StringComparison.OrdinalIgnoreCase)) return true;
 
                 if (origin.StartsWith("https://regulariza-farma-test.web.app", StringComparison.OrdinalIgnoreCase)) return true;
+                if (origin.StartsWith("https://www.regularizafarmaapp.com.br", StringComparison.OrdinalIgnoreCase)) return true;
+                if (origin.StartsWith("https://regularizafarmaapp.com.br", StringComparison.OrdinalIgnoreCase)) return true;
 
                 return false;
             })
@@ -52,7 +55,11 @@ var app = builder.Build();
 // ⚠️ UseCors tem que vir ANTES dos MapGet/MapPost
 app.UseCors("AllowFlutterWeb");
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () =>
+{
+    Log("GET /health");
+    return Results.Ok(new { status = "ok" });
+});
 
 // =======================
 // LISTA DISPOSITIVOS WIA (late binding – SEM using WIA)
@@ -61,6 +68,8 @@ app.MapGet("/devices", () =>
 {
     try
     {
+        Log("GET /devices");
+
         dynamic manager = Activator.CreateInstance(
             Type.GetTypeFromProgID("WIA.DeviceManager")!
         );
@@ -68,6 +77,8 @@ app.MapGet("/devices", () =>
         var devices = new List<object>();
 
         int count = manager.DeviceInfos.Count;
+        Log($"Total de dispositivos WIA encontrados: {count}");
+
         for (int i = 1; i <= count; i++)
         {
             dynamic info = manager.DeviceInfos.Item(i);
@@ -80,6 +91,8 @@ app.MapGet("/devices", () =>
             try { name = info.Properties["Name"].Value?.ToString() ?? ""; } catch { }
             try { type = (int)info.Type; } catch { }
 
+            Log($"GET /devices | index={i} | type={type} | name='{name}' | id='{id}'");
+
             devices.Add(new { id, name, type });
         }
 
@@ -87,6 +100,7 @@ app.MapGet("/devices", () =>
     }
     catch (Exception ex)
     {
+        Log($"Erro em GET /devices: {ex}");
         return Results.Problem(ex.ToString());
     }
 });
@@ -107,12 +121,19 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
 
         string? deviceId = ctx.Request.Query["deviceId"].ToString();
 
+        Log($"POST /scan/pdf | forceUi={forceUi} | deviceId='{deviceId}'");
+
         byte[] imageBytes = await RunStaAsync(() => AcquireImagePngBytes(forceUi, deviceId));
 
         if (imageBytes.Length == 0)
+        {
+            Log("POST /scan/pdf | Scan cancelado ou sem imagem.");
             return Results.BadRequest("Scan cancelado.");
+        }
 
         byte[] pdfBytes = CreatePdf(imageBytes);
+
+        Log($"POST /scan/pdf | PDF gerado com sucesso | tamanho={pdfBytes.Length} bytes");
 
         return Results.File(
             pdfBytes,
@@ -122,10 +143,12 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
     }
     catch (COMException ex)
     {
+        Log($"Erro COM/WIA em POST /scan/pdf: {ex}");
         return Results.Problem($"Erro COM/WIA: {ex.Message}");
     }
     catch (Exception ex)
     {
+        Log($"Erro em POST /scan/pdf: {ex}");
         return Results.Problem(ex.ToString());
     }
 });
@@ -146,10 +169,17 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
 
         string? deviceId = ctx.Request.Query["deviceId"].ToString();
 
+        Log($"POST /scan/png | forceUi={forceUi} | deviceId='{deviceId}'");
+
         byte[] imageBytes = await RunStaAsync(() => AcquireImagePngBytes(forceUi, deviceId));
 
         if (imageBytes.Length == 0)
+        {
+            Log("POST /scan/png | Scan cancelado ou sem imagem.");
             return Results.BadRequest("Scan cancelado.");
+        }
+
+        Log($"POST /scan/png | PNG gerado com sucesso | tamanho={imageBytes.Length} bytes");
 
         return Results.File(
             imageBytes,
@@ -159,10 +189,12 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
     }
     catch (COMException ex)
     {
+        Log($"Erro COM/WIA em POST /scan/png: {ex}");
         return Results.Problem($"Erro COM/WIA: {ex.Message}");
     }
     catch (Exception ex)
     {
+        Log($"Erro em POST /scan/png: {ex}");
         return Results.Problem(ex.ToString());
     }
 });
@@ -178,6 +210,8 @@ app.Urls.Add("http://127.0.0.1:4545");
 // 1) Sobe o servidor sem travar UI
 await app.StartAsync();
 
+Log("Scanner Connector iniciado em http://127.0.0.1:4545");
+
 // 2) Cria o ícone de bandeja (sem janela)
 ApplicationConfiguration.Initialize();
 
@@ -192,6 +226,7 @@ menu.Items.Add("Testar /health", null, async (_, __) =>
     }
     catch (Exception ex)
     {
+        Log($"Erro ao testar /health pelo menu: {ex}");
         MessageBox.Show(ex.Message, "Erro");
     }
 });
@@ -210,9 +245,14 @@ menu.Items.Add("Sair", null, async (_, __) =>
 {
     try
     {
+        Log("Usuário clicou em Sair.");
         await app.StopAsync();
     }
-    catch { }
+    catch (Exception ex)
+    {
+        Log($"Erro ao parar app pelo menu Sair: {ex}");
+    }
+
     Application.Exit();
 });
 
@@ -223,6 +263,7 @@ var notify = new NotifyIcon
     Visible = true,
     ContextMenuStrip = menu
 };
+
 notify.ShowBalloonTip(
     3000,
     "Regulariza Popular Escaneamento",
@@ -241,6 +282,7 @@ notify.DoubleClick += async (_, __) =>
     }
     catch (Exception ex)
     {
+        Log($"Erro ao testar /health no duplo clique: {ex}");
         MessageBox.Show(ex.Message, "Erro");
     }
 };
@@ -250,14 +292,20 @@ Application.ApplicationExit += async (_, __) =>
 {
     try
     {
+        Log("ApplicationExit chamado. Parando servidor.");
         await app.StopAsync();
     }
-    catch { }
+    catch (Exception ex)
+    {
+        Log($"Erro no ApplicationExit: {ex}");
+    }
 };
+
 Application.Run();
 
 // 4) Cleanup (quando sair)
 notify.Visible = false;
+Log("Scanner Connector finalizado.");
 
 // =======================
 // MÉTODOS AUXILIARES
@@ -268,13 +316,19 @@ static byte[] AcquireImagePngBytes(bool forceUi, string? deviceId = null)
     const int ScannerDeviceType = 1; // WiaDeviceType.ScannerDeviceType
     const string WiaFormatPng = "{B96B3CAF-0728-11D3-9D7B-0000F81EF32E}"; // wiaFormatPNG
 
+    Log($"AcquireImagePngBytes iniciado | forceUi={forceUi} | deviceId='{deviceId}'");
+
     // Se pediu UI, só abre a janela do WIA quando NÃO veio scanner específico.
     // Com deviceId, o ShowAcquireImage pode ignorar a escolha e acionar outro scanner.
     if (forceUi)
     {
         if (!string.IsNullOrWhiteSpace(deviceId))
+        {
+            Log("Erro: forceUi=true com deviceId informado. Modo UI não suporta seleção direta.");
             throw new Exception("Modo com janela do scanner não suporta seleção direta por deviceId.");
+        }
 
+        Log("Abrindo scanner com janela WIA.");
         return AcquireWithUiDialog(WiaFormatPng);
     }
 
@@ -285,6 +339,8 @@ static byte[] AcquireImagePngBytes(bool forceUi, string? deviceId = null)
     var candidates = new List<(dynamic info, string name)>();
 
     int count = deviceManager.DeviceInfos.Count;
+    Log($"Total de dispositivos WIA encontrados dentro do scan: {count}");
+
     for (int i = 1; i <= count; i++)
     {
         dynamic info = deviceManager.DeviceInfos.Item(i);
@@ -292,41 +348,67 @@ static byte[] AcquireImagePngBytes(bool forceUi, string? deviceId = null)
         int type = 0;
         try { type = (int)info.Type; } catch { }
 
-        if (type != ScannerDeviceType)
-            continue;
+        string id = "";
+        try { id = info.DeviceID?.ToString() ?? ""; } catch { }
 
         string name = "";
         try { name = info.Properties["Name"].Value?.ToString() ?? ""; } catch { }
 
+        Log($"Dispositivo encontrado | index={i} | type={type} | name='{name}' | id='{id}'");
+
+        if (type != ScannerDeviceType)
+        {
+            Log($"Dispositivo ignorado porque não é scanner | index={i} | type={type}");
+            continue;
+        }
+
         candidates.Add((info, name));
     }
 
+    Log($"Total de scanners candidatos: {candidates.Count}");
+
     if (candidates.Count == 0)
+    {
+        Log("Nenhum scanner encontrado.");
         throw new Exception("Nenhum scanner encontrado.");
+    }
 
     dynamic selectedInfo = null!;
 
     // Se veio um deviceId do Flutter, usa ele
     if (!string.IsNullOrWhiteSpace(deviceId))
     {
+        Log($"Tentando selecionar scanner pelo deviceId recebido do Flutter: '{deviceId}'");
+
         foreach (var c in candidates)
         {
             string id = "";
             try { id = c.info.DeviceID?.ToString() ?? ""; } catch { }
 
+            string name = "";
+            try { name = c.info.Properties["Name"].Value?.ToString() ?? ""; } catch { }
+
+            Log($"Comparando scanner candidato | name='{name}' | id='{id}'");
+
             if (string.Equals(id, deviceId, StringComparison.OrdinalIgnoreCase))
             {
                 selectedInfo = c.info;
+                Log($"Scanner encontrado pelo deviceId | name='{name}' | id='{id}'");
                 break;
             }
         }
 
         if (selectedInfo == null)
+        {
+            Log($"Scanner selecionado não encontrado para deviceId='{deviceId}'");
             throw new Exception("Scanner selecionado não encontrado.");
+        }
     }
     else
     {
         // Se não veio deviceId, mantém comportamento antigo
+        Log("Nenhum deviceId veio do Flutter. Usando seleção automática antiga.");
+
         var selected = candidates.FirstOrDefault(c =>
             (c.name ?? "").Contains("USB", StringComparison.OrdinalIgnoreCase)
         );
@@ -334,16 +416,35 @@ static byte[] AcquireImagePngBytes(bool forceUi, string? deviceId = null)
         selectedInfo = selected.info ?? candidates[0].info;
     }
 
+    try
+    {
+        string selectedId = selectedInfo.DeviceID?.ToString() ?? "";
+        string selectedName = selectedInfo.Properties["Name"].Value?.ToString() ?? "";
+
+        Log($"Scanner selecionado | name='{selectedName}' | id='{selectedId}'");
+    }
+    catch (Exception ex)
+    {
+        Log($"Erro ao registrar scanner selecionado: {ex.Message}");
+    }
+
     dynamic selectedDevice = selectedInfo.Connect();
+
+    Log("Scanner conectado. Tentando escanear sem janela.");
 
     // 1) tenta SILENT (sem UI)
     try
     {
         var bytes = AcquireSilent(selectedDevice, WiaFormatPng);
-        if (bytes.Length > 0) return bytes;
+
+        Log($"Resultado AcquireSilent | bytes={bytes.Length}");
+
+        if (bytes.Length > 0)
+            return bytes;
     }
-    catch
+    catch (Exception ex)
     {
+        Log($"AcquireSilent falhou: {ex.Message}");
         // cai pro fallback
     }
 
@@ -351,14 +452,18 @@ static byte[] AcquireImagePngBytes(bool forceUi, string? deviceId = null)
     // Se veio deviceId, não abre a janela do WIA para evitar acionar outro scanner.
     if (string.IsNullOrWhiteSpace(deviceId))
     {
+        Log("Sem deviceId. Abrindo fallback com janela WIA.");
         return AcquireWithUiDialog(WiaFormatPng);
     }
 
+    Log("Falha ao escanear com deviceId específico. Não será aberto fallback UI para evitar acionar outro scanner.");
     throw new Exception("Não foi possível escanear com o scanner selecionado. Tente selecionar outro scanner.");
 }
 
 static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
 {
+    Log("AcquireSilent iniciado.");
+
     // item 1 geralmente é o flatbed
     dynamic item = device.Items[1];
 
@@ -367,13 +472,24 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     TrySetPropertyDynamic(item.Properties, "ShowProgress", false);
 
     dynamic image = item.Transfer(wiaFormatPng);
-    if (image == null) return Array.Empty<byte>();
 
-    return (byte[])image.FileData.BinaryData;
+    if (image == null)
+    {
+        Log("AcquireSilent retornou imagem nula.");
+        return Array.Empty<byte>();
+    }
+
+    byte[] bytes = (byte[])image.FileData.BinaryData;
+
+    Log($"AcquireSilent concluído | bytes={bytes.Length}");
+
+    return bytes;
 }
 
 static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
 {
+    Log($"AcquireWithUiDialog iniciado | deviceId='{deviceId}'");
+
     dynamic dialog = Activator.CreateInstance(
         Type.GetTypeFromProgID("WIA.CommonDialog")!
     );
@@ -383,6 +499,8 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
     const int MaxQuality = 2;
 
     bool alwaysSelectDevice = string.IsNullOrWhiteSpace(deviceId);
+
+    Log($"ShowAcquireImage | alwaysSelectDevice={alwaysSelectDevice}");
 
     dynamic image = dialog.ShowAcquireImage(
         ScannerDeviceType,
@@ -394,8 +512,17 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
         false
     );
 
-    if (image == null) return Array.Empty<byte>();
-    return (byte[])image.FileData.BinaryData;
+    if (image == null)
+    {
+        Log("AcquireWithUiDialog retornou imagem nula.");
+        return Array.Empty<byte>();
+    }
+
+    byte[] bytes = (byte[])image.FileData.BinaryData;
+
+    Log($"AcquireWithUiDialog concluído | bytes={bytes.Length}");
+
+    return bytes;
 }
 
 static void TrySetPropertyDynamic(dynamic props, string name, object value)
@@ -407,9 +534,11 @@ static void TrySetPropertyDynamic(dynamic props, string name, object value)
             try
             {
                 string propName = p.Name?.ToString() ?? "";
+
                 if (string.Equals(propName, name, StringComparison.OrdinalIgnoreCase))
                 {
                     p.set_Value(value);
+                    Log($"Propriedade WIA alterada | {name}={value}");
                     return;
                 }
             }
@@ -421,6 +550,8 @@ static void TrySetPropertyDynamic(dynamic props, string name, object value)
 
 static byte[] CreatePdf(byte[] imageBytes)
 {
+    Log($"CreatePdf iniciado | imagem={imageBytes.Length} bytes");
+
     var doc = Document.Create(container =>
     {
         container.Page(page =>
@@ -431,7 +562,11 @@ static byte[] CreatePdf(byte[] imageBytes)
         });
     });
 
-    return doc.GeneratePdf();
+    byte[] pdfBytes = doc.GeneratePdf();
+
+    Log($"CreatePdf concluído | pdf={pdfBytes.Length} bytes");
+
+    return pdfBytes;
 }
 
 static Task<T> RunStaAsync<T>(Func<T> func)
@@ -454,4 +589,21 @@ static Task<T> RunStaAsync<T>(Func<T> func)
     thread.Start();
 
     return tcs.Task;
+}
+
+static void Log(string mensagem)
+{
+    try
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "scanner-log.txt");
+
+        File.AppendAllText(
+            path,
+            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {mensagem}{Environment.NewLine}"
+        );
+    }
+    catch
+    {
+        // Não deixa o log quebrar o scanner
+    }
 }
