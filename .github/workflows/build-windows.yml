@@ -29,7 +29,7 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/health' -TimeoutSec 2
-                if ($health.status -eq 'ok' -and $health.version -eq '1.0.9.0') {
+                if ($health.status -eq 'ok' -and $health.version -eq '1.0.10.0') {
                   $ready = $true
                   break
                 }
@@ -37,7 +37,24 @@ jobs:
             }
             if (-not $ready) { throw 'O conector não respondeu em /health.' }
             $status = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/api/dashboard/status'
-            if ($status.version -ne '1.0.9.0') { throw 'Status do painel incorreto.' }
+            if ($status.version -ne '1.0.10.0') { throw 'Status do painel incorreto.' }
+            if ($status.startup.configured) { throw 'Inicialização automática inesperadamente ativada.' }
+            $startupUrl = 'http://127.0.0.1:4545/api/dashboard/startup'
+            try {
+              Invoke-RestMethod -Uri $startupUrl -Method Post -ContentType 'application/json' -Body '{"enabled":true}' -ErrorAction Stop | Out-Null
+              throw 'Endpoint aceitou alteração sem cabeçalho do painel.'
+            } catch {
+              if ($_.Exception.Response.StatusCode -ne 403) { throw }
+            }
+            try {
+              $startup = Invoke-RestMethod -Uri $startupUrl -Method Post -ContentType 'application/json' -Headers @{'X-Scanner-Dashboard'='1'} -Body '{"enabled":true}'
+              if (-not $startup.configured -or -not $startup.pointsToCurrentExe) { throw 'Inicialização automática não ativada.' }
+              $status = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/api/dashboard/status'
+              if (-not $status.startup.pointsToCurrentExe) { throw 'Status não refletiu a configuração.' }
+            } finally {
+              $startup = Invoke-RestMethod -Uri $startupUrl -Method Post -ContentType 'application/json' -Headers @{'X-Scanner-Dashboard'='1'} -Body '{"enabled":false}'
+              if ($startup.configured) { throw 'Inicialização automática não desativada.' }
+            }
             $devices = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/api/dashboard/devices'
             if ($null -eq $devices.available) { throw 'Resposta de dispositivos inválida.' }
             $logs = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/api/dashboard/logs'
@@ -57,7 +74,7 @@ jobs:
           }
       - uses: actions/upload-artifact@v4
         with:
-          name: scan-local-service-1.0.9-win-x64
+          name: scan-local-service-1.0.10-win-x64
           path: |
             publish_single/ScanLocalService.exe
             publish_single/LatoFont/**

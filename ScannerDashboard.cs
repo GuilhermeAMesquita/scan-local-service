@@ -45,6 +45,20 @@ internal static class ScannerDashboard
         app.MapGet("/ui/app.js", () => Embedded("Ui.app.js", "text/javascript; charset=utf-8"));
 
         app.MapGet("/api/dashboard/status", () => Results.Ok(ScannerDiagnostics.Snapshot()));
+        app.MapPost("/api/dashboard/startup", (HttpContext context, StartupRequest request) =>
+        {
+            if (context.Request.Headers["X-Scanner-Dashboard"] != "1")
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            try
+            {
+                return Results.Ok(WindowsStartup.SetEnabled(request.Enabled));
+            }
+            catch (Exception error)
+            {
+                ScannerDiagnostics.AppendLog($"Falha ao configurar inicialização automática: {error.Message}");
+                return Results.Problem("Não foi possível alterar a inicialização automática do Windows.", statusCode: 500);
+            }
+        });
         app.MapGet("/api/dashboard/logs", (int? lines) =>
         {
             int count = Math.Clamp(lines ?? 250, 1, 1000);
@@ -202,3 +216,5 @@ internal static class ScannerDashboard
         public Dictionary<string, string> ScanProperties { get; set; } = new();
     }
 }
+
+internal sealed record StartupRequest(bool Enabled);

@@ -13,6 +13,7 @@
   const size = value => value == null ? '—' : value >= 1048576 ? `${(value / 1048576).toFixed(1)} MB` : `${Math.round(value / 1024)} KB`;
   let allLogs = [];
   let busy = false;
+  let startupState = null;
 
   $('page-title').textContent = pages[page][0];
   $('page-description').textContent = pages[page][1];
@@ -74,6 +75,56 @@
     const wia = $('wia-pill');
     wia.textContent = data.wiaAvailable ? 'WIA disponível' : 'WIA indisponível';
     wia.className = `pill ${data.wiaAvailable ? 'good' : 'bad'}`;
+    renderStartup(data.startup);
+  }
+
+  function renderStartup(startup) {
+    startupState = startup || null;
+    const pill = $('startup-pill');
+    const toggle = $('startup-toggle');
+    const repair = $('startup-repair');
+    if (!startup) {
+      pill.textContent = 'Indisponível';
+      set('startup-description', 'Não foi possível consultar a inicialização automática.');
+      toggle.disabled = true;
+      repair.hidden = true;
+      return;
+    }
+    const current = startup.configured && startup.pointsToCurrentExe;
+    pill.textContent = current ? 'Ativado' : startup.configured ? 'Caminho antigo' : 'Desativado';
+    pill.className = `pill ${current ? 'good' : startup.configured ? 'bad' : ''}`;
+    set('startup-path', startup.executablePath);
+    set('startup-description', current
+      ? 'O conector abrirá automaticamente quando este usuário entrar no Windows.'
+      : startup.configured
+        ? 'Existe uma configuração antiga. Atualize o caminho para iniciar esta versão do conector.'
+        : 'O conector só inicia quando você o abre manualmente.');
+    toggle.disabled = false;
+    toggle.textContent = startup.configured ? 'Desativar inicialização automática' : 'Ativar inicialização automática';
+    repair.hidden = !startup.configured || current;
+  }
+
+  async function updateStartup(enabled) {
+    const toggle = $('startup-toggle');
+    const repair = $('startup-repair');
+    toggle.disabled = true;
+    repair.disabled = true;
+    set('startup-feedback', 'Salvando configuração...');
+    try {
+      const response = await fetch('/api/dashboard/startup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Scanner-Dashboard': '1' },
+        body: JSON.stringify({ enabled })
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      renderStartup(await response.json());
+      set('startup-feedback', enabled ? 'Inicialização automática ativada.' : 'Inicialização automática desativada.');
+    } catch (error) {
+      set('startup-feedback', `Falha ao salvar: ${error.message}`);
+    } finally {
+      toggle.disabled = false;
+      repair.disabled = false;
+    }
   }
 
   function element(tag, className, text) {
@@ -195,6 +246,8 @@
     $('log-lines').addEventListener('change', load);
     setInterval(() => { if ($('log-auto').checked && !document.hidden) load(); }, 6000);
   } else if (page === 'status') {
+    $('startup-toggle').addEventListener('click', () => updateStartup(!startupState?.configured));
+    $('startup-repair').addEventListener('click', () => updateStartup(true));
     setInterval(() => { if (!document.hidden) load(); }, 10000);
   }
   load();

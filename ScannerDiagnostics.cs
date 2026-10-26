@@ -136,6 +136,7 @@ internal static class ScannerDiagnostics
                 wiaAvailable = Type.GetTypeFromProgID("WIA.DeviceManager") is not null,
                 logPath = LogPath,
                 logBytes = log.Exists ? log.Length : 0,
+                startup = WindowsStartup.GetStatus(),
                 scan = new
                 {
                     requested = Interlocked.Read(ref _requested),
