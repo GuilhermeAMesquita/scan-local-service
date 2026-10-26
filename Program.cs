@@ -467,6 +467,12 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     // item 1 geralmente é o flatbed
     dynamic item = device.Items[1];
 
+    // O padrão de alguns drivers é 75 DPI (A4 com ~640 px de largura),
+    // insuficiente para ler o texto pequeno dos cupons no PDF gerado.
+    // Configure a resolução no hardware antes da transferência: ampliar o
+    // arquivo depois do scan não recupera os caracteres perdidos.
+    TryConfigureScanResolution(item, 300);
+
     // Não force ShowUI=false aqui: alguns drivers quebram.
     // No máximo desliga progresso (e ainda assim pode ser ignorado).
     TrySetPropertyDynamic(item.Properties, "ShowProgress", false);
@@ -482,6 +488,7 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     byte[] bytes = (byte[])image.FileData.BinaryData;
 
     Log($"AcquireSilent concluído | bytes={bytes.Length}");
+    LogCapturedImageDimensions(bytes);
 
     return bytes;
 }
@@ -496,7 +503,7 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
 
     const int ScannerDeviceType = 1;
     const int ColorIntent = 1;
-    const int MaxQuality = 2;
+    const int MaxQuality = 131072; // WiaImageBias.MaximizeQuality
 
     bool alwaysSelectDevice = string.IsNullOrWhiteSpace(deviceId);
 
@@ -521,6 +528,7 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
     byte[] bytes = (byte[])image.FileData.BinaryData;
 
     Log($"AcquireWithUiDialog concluído | bytes={bytes.Length}");
+    LogCapturedImageDimensions(bytes);
 
     return bytes;
 }
@@ -548,6 +556,64 @@ static void TrySetPropertyDynamic(dynamic props, string name, object value)
     catch { }
 }
 
+static void TryConfigureScanResolution(dynamic item, int dpi)
+{
+    try
+    {
+        dynamic properties = item.Properties;
+        // WIA_IPS_XRES e WIA_IPS_YRES. Os IDs são estáveis entre drivers;
+        // os nomes localizados das propriedades não são.
+        dynamic xResolution = properties["6147"];
+        dynamic yResolution = properties["6148"];
+        int oldX = Convert.ToInt32(xResolution.Value);
+        int oldY = Convert.ToInt32(yResolution.Value);
+
+        foreach (int candidateDpi in new[] { dpi, 200 }.Distinct())
+        {
+            try
+            {
+                xResolution.set_Value(candidateDpi);
+                yResolution.set_Value(candidateDpi);
+
+                int actualX = Convert.ToInt32(xResolution.Value);
+                int actualY = Convert.ToInt32(yResolution.Value);
+                Log($"Resolução WIA solicitada={candidateDpi} DPI | efetiva={actualX}x{actualY} DPI");
+
+                if (actualX >= candidateDpi && actualY >= candidateDpi)
+                    return;
+            }
+            catch (Exception ex)
+            {
+                Log($"Scanner não aceitou {candidateDpi} DPI | motivo={ex.Message}");
+            }
+        }
+
+        // Nem todo scanner aceita 200/300 DPI. Preserve as configurações
+        // originais para não interromper o fluxo que já funciona.
+        try { xResolution.set_Value(oldX); } catch { }
+        try { yResolution.set_Value(oldY); } catch { }
+        Log($"Scanner não aplicou resolução suficiente; configuração anterior restaurada ({oldX}x{oldY} DPI).");
+    }
+    catch (Exception ex)
+    {
+        Log($"Resolução WIA indisponível; mantendo configuração do driver | motivo={ex.Message}");
+    }
+}
+
+static void LogCapturedImageDimensions(byte[] imageBytes)
+{
+    try
+    {
+        using var stream = new MemoryStream(imageBytes);
+        using var image = System.Drawing.Image.FromStream(stream);
+        Log($"Imagem capturada | largura={image.Width}px | altura={image.Height}px");
+    }
+    catch (Exception ex)
+    {
+        Log($"Não foi possível medir a imagem capturada | motivo={ex.Message}");
+    }
+}
+
 static byte[] CreatePdf(byte[] imageBytes)
 {
     Log($"CreatePdf iniciado | imagem={imageBytes.Length} bytes");
@@ -558,7 +624,12 @@ static byte[] CreatePdf(byte[] imageBytes)
         {
             page.Size(PageSizes.A4);
             page.Margin(20);
-            page.Content().Image(imageBytes).FitArea();
+            page.Content().Image(imageBytes)
+                .WithCompressionQuality(ImageCompressionQuality.VeryHigh)
+                // A margem do A4 reduz a largura física da imagem no PDF.
+                // 400 evita diminuir um scan de 300 DPI nesse encaixe.
+                .WithRasterDpi(400)
+                .FitArea();
         });
     });
 

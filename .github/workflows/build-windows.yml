@@ -1,0 +1,27 @@
+name: Build Windows scanner connector
+
+on:
+  push:
+    branches:
+      - main
+      - fix/scan-quality-300dpi-20261026
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build
+        run: dotnet build ScanLocalService.sln --configuration Release
+      - name: Publish self-contained executable
+        run: dotnet publish ScanLocalService.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output publish_single
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scan-local-service-win-x64
+          path: |
+            publish_single/ScanLocalService.exe
+            publish_single/LatoFont/**
