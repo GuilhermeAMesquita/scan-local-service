@@ -491,6 +491,17 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     byte[] bytes = (byte[])image.FileData.BinaryData;
 
     Log($"AcquireSilent concluído | bytes={bytes.Length}");
+    try
+    {
+        int actualX = Convert.ToInt32(item.Properties["6147"].Value);
+        int actualY = Convert.ToInt32(item.Properties["6148"].Value);
+        ScannerDiagnostics.ResolutionMeasured(actualX, actualY);
+        Log($"Resolução WIA após transferência | efetiva={actualX}x{actualY} DPI");
+    }
+    catch (Exception ex)
+    {
+        Log($"Não foi possível consultar a resolução WIA após transferência | motivo={ex.Message}");
+    }
     LogCapturedImageDimensions(bytes);
 
     return bytes;
@@ -575,8 +586,10 @@ static void TryConfigureScanResolution(dynamic item, int dpi)
         {
             try
             {
-                xResolution.set_Value(candidateDpi);
-                yResolution.set_Value(candidateDpi);
+                // WIA expõe Value como propriedade COM, não como método
+                // set_Value no IDispatch usado por dynamic.
+                xResolution.Value = candidateDpi;
+                yResolution.Value = candidateDpi;
 
                 int actualX = Convert.ToInt32(xResolution.Value);
                 int actualY = Convert.ToInt32(yResolution.Value);
@@ -594,8 +607,8 @@ static void TryConfigureScanResolution(dynamic item, int dpi)
 
         // Nem todo scanner aceita 200/300 DPI. Preserve as configurações
         // originais para não interromper o fluxo que já funciona.
-        try { xResolution.set_Value(oldX); } catch { }
-        try { yResolution.set_Value(oldY); } catch { }
+        try { xResolution.Value = oldX; } catch { }
+        try { yResolution.Value = oldY; } catch { }
         ScannerDiagnostics.ResolutionMeasured(oldX, oldY);
         Log($"Scanner não aplicou resolução suficiente; configuração anterior restaurada ({oldX}x{oldY} DPI).");
     }

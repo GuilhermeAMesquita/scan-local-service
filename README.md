@@ -16,7 +16,7 @@ Em **Status**, clique em **Ativar inicialização automática** depois de coloca
 
 1. Saia da versão antiga pelo ícone da bandeja e descompacte o pacote novo, preservando a pasta `LatoFont` junto do `.exe`.
 2. Execute `ScanLocalService.exe` e abra `http://127.0.0.1:4545/ui/status`.
-3. Confirme a versão **1.0.10.0** e se o scanner aparece em **Dispositivos**. Em **Status**, teste ativar e desativar a inicialização automática.
+3. Confirme a versão **1.0.11.0** e se o scanner aparece em **Dispositivos**. Em **Status**, teste ativar e desativar a inicialização automática.
 4. Faça uma captura de teste pelo botão em **Dispositivos** ou pelo Regulariza Popular; confira a resolução e as dimensões em **Status**. Para um A4 a 300 DPI, a imagem deve ter aproximadamente 2480 × 3508 pixels. O tamanho exato varia pelo driver e pela área selecionada.
 5. Se a resolução ficar abaixo de 200 DPI ou houver falha, abra **Logs**, baixe o arquivo e verifique as mensagens de WIA e as dimensões capturadas.
 
