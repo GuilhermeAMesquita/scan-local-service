@@ -115,6 +115,37 @@
         stats.append(box);
       });
       card.append(stats);
+      if (device.type === 1) {
+        const actions = element('div', 'device-actions');
+        const test = element('button', 'button button-outline', '▣ Digitalizar PDF de teste');
+        test.type = 'button';
+        const feedback = element('span', 'device-feedback', 'Coloque um documento no scanner antes do teste.');
+        test.addEventListener('click', async () => {
+          test.disabled = true;
+          test.textContent = 'Digitalizando...';
+          feedback.textContent = 'Aguardando o scanner.';
+          try {
+            const response = await fetch(`/scan/pdf?deviceId=${encodeURIComponent(device.id)}`, { method: 'POST' });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const url = URL.createObjectURL(await response.blob());
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `teste-scanner-${Date.now()}.pdf`;
+            document.body.append(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            feedback.textContent = 'PDF de teste gerado. Confira a resolução na página Status.';
+          } catch (error) {
+            feedback.textContent = `Falha no teste: ${error.message}. Veja os Logs.`;
+          } finally {
+            test.disabled = false;
+            test.textContent = '▣ Digitalizar PDF de teste';
+          }
+        });
+        actions.append(test, feedback);
+        card.append(actions);
+      }
       if (device.detailsError) card.append(element('p', 'error-text', `Detalhes indisponíveis: ${device.detailsError}`));
       const details = element('details');
       details.append(element('summary', '', 'Ver propriedades do dispositivo e do scanner'));
