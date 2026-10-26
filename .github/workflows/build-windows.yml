@@ -29,7 +29,10 @@ jobs:
               Start-Sleep -Seconds 1
               try {
                 $health = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/health' -TimeoutSec 2
-                if ($health.status -eq 'ok') { $ready = $true; break }
+                if ($health.status -eq 'ok' -and $health.version -eq '1.0.8.0') {
+                  $ready = $true
+                  break
+                }
               } catch { }
             }
             if (-not $ready) { throw 'O conector não respondeu em /health.' }

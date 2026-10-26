@@ -58,7 +58,11 @@ app.UseCors("AllowFlutterWeb");
 app.MapGet("/health", () =>
 {
     Log("GET /health");
-    return Results.Ok(new { status = "ok" });
+    return Results.Ok(new
+    {
+        status = "ok",
+        version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+    });
 });
 
 // =======================
