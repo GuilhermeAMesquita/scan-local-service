@@ -19,6 +19,23 @@ jobs:
         run: dotnet build ScanLocalService.sln --configuration Release
       - name: Publish self-contained executable
         run: dotnet publish ScanLocalService.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output publish_single
+      - name: Smoke test local HTTP service
+        shell: pwsh
+        run: |
+          $service = Start-Process -FilePath "$PWD\publish_single\ScanLocalService.exe" -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 20; $attempt++) {
+              Start-Sleep -Seconds 1
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:4545/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { $ready = $true; break }
+              } catch { }
+            }
+            if (-not $ready) { throw 'O conector não respondeu em /health.' }
+          } finally {
+            Stop-Process -Id $service.Id -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: scan-local-service-win-x64
