@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,11 +55,16 @@ var app = builder.Build();
 
 // ⚠️ UseCors tem que vir ANTES dos MapGet/MapPost
 app.UseCors("AllowFlutterWeb");
+ScannerDashboard.Map(app);
 
 app.MapGet("/health", () =>
 {
     Log("GET /health");
-    return Results.Ok(new { status = "ok" });
+    return Results.Ok(new
+    {
+        status = "ok",
+        version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+    });
 });
 
 // =======================
@@ -113,6 +119,7 @@ app.MapGet("/devices", () =>
 // =======================
 app.MapPost("/scan/pdf", async (HttpContext ctx) =>
 {
+    ScannerDiagnostics.ScanStarted("PDF");
     try
     {
         bool forceUi =
@@ -128,12 +135,14 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
         if (imageBytes.Length == 0)
         {
             Log("POST /scan/pdf | Scan cancelado ou sem imagem.");
+            ScannerDiagnostics.ScanFailed("Digitalização cancelada ou sem imagem.");
             return Results.BadRequest("Scan cancelado.");
         }
 
         byte[] pdfBytes = CreatePdf(imageBytes);
 
         Log($"POST /scan/pdf | PDF gerado com sucesso | tamanho={pdfBytes.Length} bytes");
+        ScannerDiagnostics.ScanSucceeded(pdfBytes.Length);
 
         return Results.File(
             pdfBytes,
@@ -144,11 +153,13 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
     catch (COMException ex)
     {
         Log($"Erro COM/WIA em POST /scan/pdf: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem($"Erro COM/WIA: {ex.Message}");
     }
     catch (Exception ex)
     {
         Log($"Erro em POST /scan/pdf: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem(ex.ToString());
     }
 });
@@ -161,6 +172,7 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
 // =======================
 app.MapPost("/scan/png", async (HttpContext ctx) =>
 {
+    ScannerDiagnostics.ScanStarted("PNG");
     try
     {
         bool forceUi =
@@ -176,10 +188,12 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
         if (imageBytes.Length == 0)
         {
             Log("POST /scan/png | Scan cancelado ou sem imagem.");
+            ScannerDiagnostics.ScanFailed("Digitalização cancelada ou sem imagem.");
             return Results.BadRequest("Scan cancelado.");
         }
 
         Log($"POST /scan/png | PNG gerado com sucesso | tamanho={imageBytes.Length} bytes");
+        ScannerDiagnostics.ScanSucceeded(imageBytes.Length);
 
         return Results.File(
             imageBytes,
@@ -190,11 +204,13 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
     catch (COMException ex)
     {
         Log($"Erro COM/WIA em POST /scan/png: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem($"Erro COM/WIA: {ex.Message}");
     }
     catch (Exception ex)
     {
         Log($"Erro em POST /scan/png: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem(ex.ToString());
     }
 });
@@ -216,6 +232,7 @@ Log("Scanner Connector iniciado em http://127.0.0.1:4545");
 ApplicationConfiguration.Initialize();
 
 var menu = new ContextMenuStrip();
+menu.Items.Add("Abrir painel", null, (_, __) => OpenDashboard());
 menu.Items.Add("Testar /health", null, async (_, __) =>
 {
     try
@@ -267,25 +284,11 @@ var notify = new NotifyIcon
 notify.ShowBalloonTip(
     3000,
     "Regulariza Popular Escaneamento",
-    "Funcionando em segundo plano",
+    "Funcionando em segundo plano. Dê dois cliques para abrir o painel.",
     ToolTipIcon.Info
 );
 
-// Opcional: duplo clique abre o teste
-notify.DoubleClick += async (_, __) =>
-{
-    try
-    {
-        using var http = new System.Net.Http.HttpClient();
-        var txt = await http.GetStringAsync("http://127.0.0.1:4545/health");
-        MessageBox.Show(txt, "Scanner Connector");
-    }
-    catch (Exception ex)
-    {
-        Log($"Erro ao testar /health no duplo clique: {ex}");
-        MessageBox.Show(ex.Message, "Erro");
-    }
-};
+notify.DoubleClick += (_, __) => OpenDashboard();
 
 // 3) Segura o app vivo sem abrir janela
 Application.ApplicationExit += async (_, __) =>
@@ -467,6 +470,12 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     // item 1 geralmente é o flatbed
     dynamic item = device.Items[1];
 
+    // O padrão de alguns drivers é 75 DPI (A4 com ~640 px de largura),
+    // insuficiente para ler o texto pequeno dos cupons no PDF gerado.
+    // Configure a resolução no hardware antes da transferência: ampliar o
+    // arquivo depois do scan não recupera os caracteres perdidos.
+    TryConfigureScanResolution(item, 300);
+
     // Não force ShowUI=false aqui: alguns drivers quebram.
     // No máximo desliga progresso (e ainda assim pode ser ignorado).
     TrySetPropertyDynamic(item.Properties, "ShowProgress", false);
@@ -482,6 +491,18 @@ static byte[] AcquireSilent(dynamic device, string wiaFormatPng)
     byte[] bytes = (byte[])image.FileData.BinaryData;
 
     Log($"AcquireSilent concluído | bytes={bytes.Length}");
+    try
+    {
+        int actualX = Convert.ToInt32(item.Properties["6147"].Value);
+        int actualY = Convert.ToInt32(item.Properties["6148"].Value);
+        ScannerDiagnostics.ResolutionMeasured(actualX, actualY);
+        Log($"Resolução WIA após transferência | efetiva={actualX}x{actualY} DPI");
+    }
+    catch (Exception ex)
+    {
+        Log($"Não foi possível consultar a resolução WIA após transferência | motivo={ex.Message}");
+    }
+    LogCapturedImageDimensions(bytes);
 
     return bytes;
 }
@@ -496,7 +517,7 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
 
     const int ScannerDeviceType = 1;
     const int ColorIntent = 1;
-    const int MaxQuality = 2;
+    const int MaxQuality = 131072; // WiaImageBias.MaximizeQuality
 
     bool alwaysSelectDevice = string.IsNullOrWhiteSpace(deviceId);
 
@@ -521,6 +542,7 @@ static byte[] AcquireWithUiDialog(string wiaFormatPng, string? deviceId = null)
     byte[] bytes = (byte[])image.FileData.BinaryData;
 
     Log($"AcquireWithUiDialog concluído | bytes={bytes.Length}");
+    LogCapturedImageDimensions(bytes);
 
     return bytes;
 }
@@ -548,6 +570,69 @@ static void TrySetPropertyDynamic(dynamic props, string name, object value)
     catch { }
 }
 
+static void TryConfigureScanResolution(dynamic item, int dpi)
+{
+    try
+    {
+        dynamic properties = item.Properties;
+        // WIA_IPS_XRES e WIA_IPS_YRES. Os IDs são estáveis entre drivers;
+        // os nomes localizados das propriedades não são.
+        dynamic xResolution = properties["6147"];
+        dynamic yResolution = properties["6148"];
+        int oldX = Convert.ToInt32(xResolution.Value);
+        int oldY = Convert.ToInt32(yResolution.Value);
+
+        foreach (int candidateDpi in new[] { dpi, 200 }.Distinct())
+        {
+            try
+            {
+                // WIA expõe Value como propriedade COM, não como método
+                // set_Value no IDispatch usado por dynamic.
+                xResolution.Value = candidateDpi;
+                yResolution.Value = candidateDpi;
+
+                int actualX = Convert.ToInt32(xResolution.Value);
+                int actualY = Convert.ToInt32(yResolution.Value);
+                Log($"Resolução WIA solicitada={candidateDpi} DPI | efetiva={actualX}x{actualY} DPI");
+                ScannerDiagnostics.ResolutionMeasured(actualX, actualY);
+
+                if (actualX >= candidateDpi && actualY >= candidateDpi)
+                    return;
+            }
+            catch (Exception ex)
+            {
+                Log($"Scanner não aceitou {candidateDpi} DPI | motivo={ex.Message}");
+            }
+        }
+
+        // Nem todo scanner aceita 200/300 DPI. Preserve as configurações
+        // originais para não interromper o fluxo que já funciona.
+        try { xResolution.Value = oldX; } catch { }
+        try { yResolution.Value = oldY; } catch { }
+        ScannerDiagnostics.ResolutionMeasured(oldX, oldY);
+        Log($"Scanner não aplicou resolução suficiente; configuração anterior restaurada ({oldX}x{oldY} DPI).");
+    }
+    catch (Exception ex)
+    {
+        Log($"Resolução WIA indisponível; mantendo configuração do driver | motivo={ex.Message}");
+    }
+}
+
+static void LogCapturedImageDimensions(byte[] imageBytes)
+{
+    try
+    {
+        using var stream = new MemoryStream(imageBytes);
+        using var image = System.Drawing.Image.FromStream(stream);
+        Log($"Imagem capturada | largura={image.Width}px | altura={image.Height}px");
+        ScannerDiagnostics.CaptureMeasured(image.Width, image.Height);
+    }
+    catch (Exception ex)
+    {
+        Log($"Não foi possível medir a imagem capturada | motivo={ex.Message}");
+    }
+}
+
 static byte[] CreatePdf(byte[] imageBytes)
 {
     Log($"CreatePdf iniciado | imagem={imageBytes.Length} bytes");
@@ -558,7 +643,12 @@ static byte[] CreatePdf(byte[] imageBytes)
         {
             page.Size(PageSizes.A4);
             page.Margin(20);
-            page.Content().Image(imageBytes).FitArea();
+            page.Content().Image(imageBytes)
+                .WithCompressionQuality(ImageCompressionQuality.VeryHigh)
+                // A margem do A4 reduz a largura física da imagem no PDF.
+                // 400 evita diminuir um scan de 300 DPI nesse encaixe.
+                .WithRasterDpi(400)
+                .FitArea();
         });
     });
 
@@ -593,17 +683,21 @@ static Task<T> RunStaAsync<T>(Func<T> func)
 
 static void Log(string mensagem)
 {
+    ScannerDiagnostics.AppendLog(mensagem);
+}
+
+static void OpenDashboard()
+{
     try
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "scanner-log.txt");
-
-        File.AppendAllText(
-            path,
-            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {mensagem}{Environment.NewLine}"
-        );
+        Process.Start(new ProcessStartInfo("http://127.0.0.1:4545/ui/status")
+        {
+            UseShellExecute = true
+        });
     }
-    catch
+    catch (Exception ex)
     {
-        // Não deixa o log quebrar o scanner
+        Log($"Erro ao abrir painel: {ex}");
+        MessageBox.Show("Abra http://127.0.0.1:4545/ui/status no navegador.", "Scanner Connector");
     }
 }
