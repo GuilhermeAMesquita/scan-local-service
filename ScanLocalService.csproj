@@ -3,9 +3,9 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Version>1.0.8.0</Version>
-    <AssemblyVersion>1.0.8.0</AssemblyVersion>
-    <FileVersion>1.0.8.0</FileVersion>
+    <Version>1.0.9.0</Version>
+    <AssemblyVersion>1.0.9.0</AssemblyVersion>
+    <FileVersion>1.0.9.0</FileVersion>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -14,6 +14,9 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="QuestPDF" Version="2025.12.3" />
+    <EmbeddedResource Include="Ui\index.html" LogicalName="Ui.index.html" />
+    <EmbeddedResource Include="Ui\app.css" LogicalName="Ui.app.css" />
+    <EmbeddedResource Include="Ui\app.js" LogicalName="Ui.app.js" />
   </ItemGroup>
 
 </Project>

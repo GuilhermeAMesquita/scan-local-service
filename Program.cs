@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,6 +55,7 @@ var app = builder.Build();
 
 // ⚠️ UseCors tem que vir ANTES dos MapGet/MapPost
 app.UseCors("AllowFlutterWeb");
+ScannerDashboard.Map(app);
 
 app.MapGet("/health", () =>
 {
@@ -117,6 +119,7 @@ app.MapGet("/devices", () =>
 // =======================
 app.MapPost("/scan/pdf", async (HttpContext ctx) =>
 {
+    ScannerDiagnostics.ScanStarted("PDF");
     try
     {
         bool forceUi =
@@ -132,12 +135,14 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
         if (imageBytes.Length == 0)
         {
             Log("POST /scan/pdf | Scan cancelado ou sem imagem.");
+            ScannerDiagnostics.ScanFailed("Digitalização cancelada ou sem imagem.");
             return Results.BadRequest("Scan cancelado.");
         }
 
         byte[] pdfBytes = CreatePdf(imageBytes);
 
         Log($"POST /scan/pdf | PDF gerado com sucesso | tamanho={pdfBytes.Length} bytes");
+        ScannerDiagnostics.ScanSucceeded(pdfBytes.Length);
 
         return Results.File(
             pdfBytes,
@@ -148,11 +153,13 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
     catch (COMException ex)
     {
         Log($"Erro COM/WIA em POST /scan/pdf: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem($"Erro COM/WIA: {ex.Message}");
     }
     catch (Exception ex)
     {
         Log($"Erro em POST /scan/pdf: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem(ex.ToString());
     }
 });
@@ -165,6 +172,7 @@ app.MapPost("/scan/pdf", async (HttpContext ctx) =>
 // =======================
 app.MapPost("/scan/png", async (HttpContext ctx) =>
 {
+    ScannerDiagnostics.ScanStarted("PNG");
     try
     {
         bool forceUi =
@@ -180,10 +188,12 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
         if (imageBytes.Length == 0)
         {
             Log("POST /scan/png | Scan cancelado ou sem imagem.");
+            ScannerDiagnostics.ScanFailed("Digitalização cancelada ou sem imagem.");
             return Results.BadRequest("Scan cancelado.");
         }
 
         Log($"POST /scan/png | PNG gerado com sucesso | tamanho={imageBytes.Length} bytes");
+        ScannerDiagnostics.ScanSucceeded(imageBytes.Length);
 
         return Results.File(
             imageBytes,
@@ -194,11 +204,13 @@ app.MapPost("/scan/png", async (HttpContext ctx) =>
     catch (COMException ex)
     {
         Log($"Erro COM/WIA em POST /scan/png: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem($"Erro COM/WIA: {ex.Message}");
     }
     catch (Exception ex)
     {
         Log($"Erro em POST /scan/png: {ex}");
+        ScannerDiagnostics.ScanFailed(ex.Message);
         return Results.Problem(ex.ToString());
     }
 });
@@ -220,6 +232,7 @@ Log("Scanner Connector iniciado em http://127.0.0.1:4545");
 ApplicationConfiguration.Initialize();
 
 var menu = new ContextMenuStrip();
+menu.Items.Add("Abrir painel", null, (_, __) => OpenDashboard());
 menu.Items.Add("Testar /health", null, async (_, __) =>
 {
     try
@@ -271,25 +284,11 @@ var notify = new NotifyIcon
 notify.ShowBalloonTip(
     3000,
     "Regulariza Popular Escaneamento",
-    "Funcionando em segundo plano",
+    "Funcionando em segundo plano. Dê dois cliques para abrir o painel.",
     ToolTipIcon.Info
 );
 
-// Opcional: duplo clique abre o teste
-notify.DoubleClick += async (_, __) =>
-{
-    try
-    {
-        using var http = new System.Net.Http.HttpClient();
-        var txt = await http.GetStringAsync("http://127.0.0.1:4545/health");
-        MessageBox.Show(txt, "Scanner Connector");
-    }
-    catch (Exception ex)
-    {
-        Log($"Erro ao testar /health no duplo clique: {ex}");
-        MessageBox.Show(ex.Message, "Erro");
-    }
-};
+notify.DoubleClick += (_, __) => OpenDashboard();
 
 // 3) Segura o app vivo sem abrir janela
 Application.ApplicationExit += async (_, __) =>
@@ -582,6 +581,7 @@ static void TryConfigureScanResolution(dynamic item, int dpi)
                 int actualX = Convert.ToInt32(xResolution.Value);
                 int actualY = Convert.ToInt32(yResolution.Value);
                 Log($"Resolução WIA solicitada={candidateDpi} DPI | efetiva={actualX}x{actualY} DPI");
+                ScannerDiagnostics.ResolutionMeasured(actualX, actualY);
 
                 if (actualX >= candidateDpi && actualY >= candidateDpi)
                     return;
@@ -596,6 +596,7 @@ static void TryConfigureScanResolution(dynamic item, int dpi)
         // originais para não interromper o fluxo que já funciona.
         try { xResolution.set_Value(oldX); } catch { }
         try { yResolution.set_Value(oldY); } catch { }
+        ScannerDiagnostics.ResolutionMeasured(oldX, oldY);
         Log($"Scanner não aplicou resolução suficiente; configuração anterior restaurada ({oldX}x{oldY} DPI).");
     }
     catch (Exception ex)
@@ -611,6 +612,7 @@ static void LogCapturedImageDimensions(byte[] imageBytes)
         using var stream = new MemoryStream(imageBytes);
         using var image = System.Drawing.Image.FromStream(stream);
         Log($"Imagem capturada | largura={image.Width}px | altura={image.Height}px");
+        ScannerDiagnostics.CaptureMeasured(image.Width, image.Height);
     }
     catch (Exception ex)
     {
@@ -668,17 +670,21 @@ static Task<T> RunStaAsync<T>(Func<T> func)
 
 static void Log(string mensagem)
 {
+    ScannerDiagnostics.AppendLog(mensagem);
+}
+
+static void OpenDashboard()
+{
     try
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "scanner-log.txt");
-
-        File.AppendAllText(
-            path,
-            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {mensagem}{Environment.NewLine}"
-        );
+        Process.Start(new ProcessStartInfo("http://127.0.0.1:4545/ui/status")
+        {
+            UseShellExecute = true
+        });
     }
-    catch
+    catch (Exception ex)
     {
-        // Não deixa o log quebrar o scanner
+        Log($"Erro ao abrir painel: {ex}");
+        MessageBox.Show("Abra http://127.0.0.1:4545/ui/status no navegador.", "Scanner Connector");
     }
 }

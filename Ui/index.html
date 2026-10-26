@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#092f46">
+  <title>Scanner • Regulariza Farma</title>
+  <link rel="stylesheet" href="/ui/app.css">
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Navegação principal">
+      <div class="brand"><span class="brand-mark">R<span>F</span></span><span class="brand-copy"><strong>Regulariza Farma</strong><small>Scanner local</small></span></div>
+      <nav class="nav">
+        <a href="/ui/status" data-page="status"><span class="nav-icon">◉</span>Status</a>
+        <a href="/ui/devices" data-page="devices"><span class="nav-icon">▣</span>Dispositivos</a>
+        <a href="/ui/logs" data-page="logs"><span class="nav-icon">≡</span>Logs</a>
+      </nav>
+      <div class="sidebar-foot"><span class="connection-dot"></span> Serviço local ativo<br><small>127.0.0.1:4545</small></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div><span class="eyebrow">CENTRAL DE DIAGNÓSTICO</span><h1 id="page-title">Carregando...</h1><p id="page-description"></p></div><div class="top-actions"><span id="clock"></span><button id="refresh" class="button button-outline" type="button">↻ Atualizar</button></div></header>
+      <div id="notice" class="notice" hidden role="alert"></div>
+
+      <section id="status-page" class="page" hidden>
+        <div class="hero"><div><span class="eyebrow">VISÃO GERAL</span><h2>Seu scanner, sob controle.</h2><p>Confira o conector, as últimas digitalizações e a qualidade de captura em um só lugar.</p></div><span class="hero-badge"><span class="connection-dot"></span> Online</span></div>
+        <div class="metrics">
+          <article class="metric"><span>Versão instalada</span><strong id="version">—</strong><small>Conector Windows</small></article>
+          <article class="metric"><span>Digitalizações nesta sessão</span><strong id="scan-requested">—</strong><small><span id="scan-succeeded">—</span> concluídas · <span id="scan-failed">—</span> falhas</small></article>
+          <article class="metric"><span>Em andamento</span><strong id="scan-active">—</strong><small>Operações neste momento</small></article>
+          <article class="metric"><span>Última resolução</span><strong id="scan-dpi">—</strong><small>Meta: 300 DPI; mínimo: 200 DPI</small></article>
+        </div>
+        <div class="grid-two">
+          <article class="panel"><div class="panel-heading"><h3>Última digitalização</h3><span id="last-result" class="pill">Sem dados</span></div><dl class="detail-grid"><div><dt>Quando</dt><dd id="last-at">—</dd></div><div><dt>Formato</dt><dd id="last-format">—</dd></div><div><dt>Imagem capturada</dt><dd id="last-dimensions">—</dd></div><div><dt>Arquivo gerado</dt><dd id="last-size">—</dd></div></dl><p id="last-error" class="error-text" hidden></p></article>
+          <article class="panel"><div class="panel-heading"><h3>Ambiente</h3><span id="wia-pill" class="pill">Verificando WIA</span></div><dl class="detail-grid"><div><dt>Computador</dt><dd id="machine">—</dd></div><div><dt>Sistema</dt><dd id="os">—</dd></div><div><dt>Arquitetura</dt><dd id="architecture">—</dd></div><div><dt>.NET</dt><dd id="dotnet">—</dd></div><div><dt>Em execução desde</dt><dd id="started">—</dd></div><div><dt>Processo / memória</dt><dd id="process">—</dd></div></dl></article>
+        </div>
+        <div class="hint"><span class="hint-icon">i</span><div><strong>Qualidade da leitura</strong><p>O conector solicita 300 DPI ao scanner e tenta 200 DPI quando necessário. A resolução real depende do dispositivo e aparece aqui após a próxima captura. PDFs antigos não ganham detalhes ao serem ampliados.</p></div></div>
+      </section>
+
+      <section id="devices-page" class="page" hidden>
+        <div class="section-intro"><div><h2>Dispositivos conectados</h2><p>Scanners e informações disponibilizadas pelo Windows Image Acquisition (WIA).</p></div><span id="device-count" class="count-pill">— dispositivos</span></div>
+        <div id="device-list" class="device-list"><div class="loading">Consultando scanners...</div></div>
+        <div class="hint"><span class="hint-icon">i</span><div><strong>Resolução do driver</strong><p>A resolução mostrada é a configuração atual do dispositivo. Ao digitalizar, o conector solicita 300 DPI; o valor efetivo fica registrado na página Status e nos Logs.</p></div></div>
+      </section>
+
+      <section id="logs-page" class="page" hidden>
+        <div class="section-intro"><div><h2>Registro de atividades</h2><p>Eventos locais do conector, tentativas de scan e mensagens dos drivers.</p></div><a class="button button-outline" href="/api/dashboard/logs/download">↓ Baixar log</a></div>
+        <div class="toolbar"><label class="search-label">Filtrar logs<input id="log-filter" type="search" placeholder="Busque por erro, dispositivo ou horário"></label><label class="select-label">Exibir<select id="log-lines"><option value="100">100 linhas</option><option value="250" selected>250 linhas</option><option value="500">500 linhas</option><option value="1000">1.000 linhas</option></select></label><label class="checkbox"><input id="log-auto" type="checkbox" checked> Atualizar automaticamente</label></div>
+        <div class="log-meta"><span id="log-count">—</span><span id="log-updated">—</span></div>
+        <div id="log-list" class="log-list" role="log" aria-live="polite"><div class="loading">Carregando logs...</div></div>
+        <div class="log-path">Arquivo local: <code id="log-path">—</code></div>
+      </section>
+      <footer class="footer">Regulariza Farma · Scanner local <span>Dados exibidos somente neste computador.</span></footer>
+    </main>
+  </div>
+</body>
+</html>
